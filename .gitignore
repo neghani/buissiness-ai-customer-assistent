@@ -62,7 +62,7 @@ uploads/
 *.docx
 *.txt
 *.html
-*.md
+
 
 # Database
 *.db
