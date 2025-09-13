@@ -3,6 +3,7 @@ FastAPI backend for RAG Assistant App
 """
 import os
 import uuid
+from datetime import datetime
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -110,7 +111,8 @@ async def upload_document(
         content_type=file.content_type or "application/octet-stream",
         storage_uri=file_path,
         status=DocumentStatus.UPLOADED,
-        user_id="default_user"  # TODO: Implement proper auth
+        user_id="default_user",  # TODO: Implement proper auth
+        created_at=datetime.utcnow()
     )
     
     # Save to database
@@ -168,35 +170,93 @@ async def delete_document(
 
 @app.post("/v1/query", response_model=QueryResponse)
 async def query_documents(
-    request: QueryRequest,
-    rag_service: RAGService = Depends(get_rag_service)
+    request: QueryRequest
 ):
-    """Query documents using RAG"""
+    """Query documents using RAG (with document retrieval)"""
     try:
+        # Always use RAG service for document queries
+        rag_service = get_rag_service()
         response = await rag_service.query(request.query, request.filters or {})
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
 
+@app.post("/v1/chat")
+async def simple_chat(
+    request: QueryRequest
+):
+    """Simple chat endpoint that bypasses RAG entirely"""
+    try:
+        print(f"Chat request: {request.query}")
+        print(f"Ollama URL: {settings.OLLAMA_BASE_URL}")
+        print(f"Model: {settings.LOCAL_LLM_MODEL}")
+        
+        # Use Ollama directly for simple chat
+        import httpx
+        async with httpx.AsyncClient() as client:
+            ollama_response = await client.post(
+                f"{settings.OLLAMA_BASE_URL}/api/generate",
+                json={
+                    "model": settings.LOCAL_LLM_MODEL,
+                    "prompt": request.query,
+                    "stream": False
+                },
+                timeout=30.0
+            )
+            print(f"Ollama response status: {ollama_response.status_code}")
+            ollama_data = ollama_response.json()
+            answer = ollama_data.get("response", "Sorry, I couldn't generate a response.")
+            
+            return QueryResponse(
+                answer=answer,
+                sources=[],
+                metadata={"model": settings.LOCAL_LLM_MODEL, "type": "direct_llm"}
+            )
+    except Exception as e:
+        print(f"Chat error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
+
 @app.get("/v1/query/stream")
 async def query_documents_stream(
     query: str,
-    filters: Optional[str] = None,
-    rag_service: RAGService = Depends(get_rag_service)
+    filters: Optional[str] = None
 ):
     """Stream query response"""
     try:
-        filter_dict = json.loads(filters) if filters else {}
-        
-        async def generate():
-            async for chunk in rag_service.query_stream(query, filter_dict):
-                yield f"data: {json.dumps(chunk)}\n\n"
-        
-        return StreamingResponse(
-            generate(),
-            media_type="text/plain",
-            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
-        )
+        # For now, just return a simple response without streaming
+        if settings.USE_LOCAL_LLM:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                ollama_response = await client.post(
+                    f"{settings.OLLAMA_BASE_URL}/api/generate",
+                    json={
+                        "model": settings.LOCAL_LLM_MODEL,
+                        "prompt": query,
+                        "stream": False
+                    },
+                    timeout=30.0
+                )
+                ollama_data = ollama_response.json()
+                answer = ollama_data.get("response", "Sorry, I couldn't generate a response.")
+                
+                return StreamingResponse(
+                    f"data: {json.dumps({'type': 'answer', 'content': answer})}\n\n",
+                    media_type="text/plain",
+                    headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+                )
+        else:
+            filter_dict = json.loads(filters) if filters else {}
+            rag_service = get_rag_service()
+            
+            async def generate():
+                async for chunk in rag_service.query_stream(query, filter_dict):
+                    yield f"data: {json.dumps(chunk)}\n\n"
+            
+            return StreamingResponse(
+                generate(),
+                media_type="text/plain",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+            )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Streaming query failed: {str(e)}")
 

@@ -21,16 +21,40 @@ from models import QueryResponse, Chunk
 class RAGService:
     def __init__(self, qdrant_client):
         self.qdrant = qdrant_client
-        self.embedding_model = self._get_embedding_model()
-        self.llm = self._get_llm()
-        self.vector_store = self._get_vector_store()
-        self.index = self._get_or_create_index()
+        self._embedding_model = None
+        self._llm = None
+        self._vector_store = None
+        self._index = None
+    
+    @property
+    def embedding_model(self):
+        if self._embedding_model is None:
+            self._embedding_model = self._get_embedding_model()
+        return self._embedding_model
+    
+    @property
+    def llm(self):
+        if self._llm is None:
+            self._llm = self._get_llm()
+        return self._llm
+    
+    @property
+    def vector_store(self):
+        if self._vector_store is None:
+            self._vector_store = self._get_vector_store()
+        return self._vector_store
+    
+    @property
+    def index(self):
+        if self._index is None:
+            self._index = self._get_or_create_index()
+        return self._index
     
     def _get_embedding_model(self):
         """Get embedding model"""
         if settings.USE_LOCAL_EMBEDDINGS:
-            from sentence_transformers import SentenceTransformer
-            return SentenceTransformer(settings.LOCAL_EMBEDDING_MODEL)
+            from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+            return HuggingFaceEmbedding(model_name=settings.LOCAL_EMBEDDING_MODEL)
         else:
             return OpenAIEmbedding(
                 model=settings.EMBEDDING_MODEL,
@@ -53,9 +77,10 @@ class RAGService:
     
     def _get_vector_store(self):
         """Get Qdrant vector store"""
+        collection_name = "chunks_local" if settings.USE_LOCAL_EMBEDDINGS else "chunks"
         return QdrantVectorStore(
             client=self.qdrant,
-            collection_name="chunks"
+            collection_name=collection_name
         )
     
     def _get_or_create_index(self):

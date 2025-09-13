@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     
     # Optional: Local Embeddings
     USE_LOCAL_EMBEDDINGS: bool = False
-    LOCAL_EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
+    LOCAL_EMBEDDING_MODEL: str = "sentence-transformers/all-mpnet-base-v2"
     
     class Config:
         env_file = ".env"

@@ -37,16 +37,26 @@ def _ensure_collections():
     collections = client.get_collections()
     collection_names = [col.name for col in collections.collections]
     
+    # Determine vector dimensions based on embedding model
+    if settings.USE_LOCAL_EMBEDDINGS:
+        # For local embeddings, use 384 dimensions (all-MiniLM-L6-v2)
+        vector_size = 384
+        collection_name = "chunks_local"
+    else:
+        # For OpenAI embeddings, use 1536 dimensions
+        vector_size = 1536
+        collection_name = "chunks"
+    
     # Create chunks collection if it doesn't exist
-    if "chunks" not in collection_names:
+    if collection_name not in collection_names:
         client.create_collection(
-            collection_name="chunks",
+            collection_name=collection_name,
             vectors_config=models.VectorParams(
-                size=1536,  # OpenAI embedding size
+                size=vector_size,
                 distance=models.Distance.COSINE
             )
         )
-        print("Created 'chunks' collection in Qdrant")
+        print(f"Created '{collection_name}' collection in Qdrant with {vector_size} dimensions")
     
     # Create documents collection if it doesn't exist
     if "documents" not in collection_names:

@@ -37,9 +37,14 @@ services:
     environment:
       - QDRANT_URL=http://qdrant:6333
       - REDIS_URL=redis://redis:6379/0
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-3-small}
       - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      - USE_LOCAL_LLM=true
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-llama3.1:8b}
+      - USE_LOCAL_EMBEDDINGS=true
+      - LOCAL_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L12-v2
       - UPLOAD_DIR=/app/uploads
       - MAX_UPLOAD_SIZE_MB=50
       - CHUNK_SIZE=1000
@@ -66,9 +71,14 @@ services:
     environment:
       - QDRANT_URL=http://qdrant:6333
       - REDIS_URL=redis://redis:6379/0
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-3-small}
       - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      - USE_LOCAL_LLM=true
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-llama3.1:8b}
+      - USE_LOCAL_EMBEDDINGS=true
+      - LOCAL_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L12-v2
       - UPLOAD_DIR=/app/uploads
       - MAX_UPLOAD_SIZE_MB=50
       - CHUNK_SIZE=1000
@@ -99,7 +109,7 @@ services:
       timeout: 10s
       retries: 3
 
-  # Optional: Ollama for local LLM
+  # Ollama for local LLM
   ollama:
     image: ollama/ollama:latest
     container_name: rag_ollama
@@ -109,8 +119,6 @@ services:
       - ollama_data:/root/.ollama
     environment:
       - OLLAMA_HOST=0.0.0.0
-    profiles:
-      - local-llm
     restart: unless-stopped
 
 volumes:

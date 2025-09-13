@@ -88,10 +88,19 @@ def get_documents() -> List[Dict[str, Any]]:
         return []
 
 def query_documents(query: str, filters: Dict[str, Any] = None) -> Dict[str, Any]:
-    """Query documents"""
+    """Query documents using RAG"""
     try:
         payload = {"query": query, "filters": filters or {}}
         response = requests.post(f"{API_BASE_URL}/v1/query", json=payload, timeout=30)
+        return response.json() if response.status_code == 200 else {"error": response.text}
+    except Exception as e:
+        return {"error": str(e)}
+
+def simple_chat(query: str) -> Dict[str, Any]:
+    """Simple chat without RAG"""
+    try:
+        payload = {"query": query}
+        response = requests.post(f"{API_BASE_URL}/v1/chat", json=payload, timeout=30)
         return response.json() if response.status_code == 200 else {"error": response.text}
     except Exception as e:
         return {"error": str(e)}
@@ -126,6 +135,21 @@ def main():
     
     # Sidebar
     with st.sidebar:
+        st.header("⚙️ Settings")
+        
+        # Mode selection
+        st.subheader("Chat Mode")
+        chat_mode = st.radio(
+            "Choose how to respond:",
+            ["🤖 RAG (Document-based)", "💬 Simple Chat"],
+            help="RAG mode uses your uploaded documents to answer questions. Simple chat mode uses the AI directly without documents."
+        )
+        
+        # Store mode in session state
+        st.session_state.chat_mode = chat_mode
+        
+        st.divider()
+        
         st.header("📁 Documents")
         
         # Upload section
@@ -150,17 +174,30 @@ def main():
         st.subheader("Document Library")
         documents = get_documents()
         
+        # Debug: Check for duplicate document IDs
+        doc_ids = [doc.get('document_id') for doc in documents]
+        if len(doc_ids) != len(set(doc_ids)):
+            st.warning("⚠️ Warning: Duplicate document IDs detected in the list")
+            st.write(f"Total documents: {len(documents)}, Unique IDs: {len(set(doc_ids))}")
+        
         if not documents:
             st.info("No documents uploaded yet")
         else:
-            for doc in documents:
+            # Initialize button counter in session state
+            if "button_counter" not in st.session_state:
+                st.session_state.button_counter = 0
+            
+            for i, doc in enumerate(documents):
                 with st.container():
                     col1, col2 = st.columns([3, 1])
                     with col1:
                         st.write(f"**{doc['filename']}**")
                         st.markdown(get_status_badge(doc['status']), unsafe_allow_html=True)
                     with col2:
-                        if st.button("🗑️", key=f"delete_{doc['document_id']}", help="Delete document"):
+                        # Create a truly unique key using session state counter
+                        st.session_state.button_counter += 1
+                        unique_key = f"delete_btn_{st.session_state.button_counter}_{doc['document_id']}"
+                        if st.button("🗑️", key=unique_key, help="Delete document"):
                             if delete_document(doc['document_id']):
                                 st.success("Document deleted")
                                 st.rerun()
@@ -168,20 +205,62 @@ def main():
                                 st.error("Failed to delete document")
                     st.divider()
     
+    # Initialize chat history
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+    
+    # Chat input (must be outside of tabs/containers)
+    chat_placeholder = "Ask a question about your documents..." if st.session_state.get("chat_mode", "🤖 RAG (Document-based)") == "🤖 RAG (Document-based)" else "Ask me anything..."
+    if prompt := st.chat_input(chat_placeholder):
+        # Add user message
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        
+        # Get assistant response based on selected mode
+        with st.spinner("Thinking..."):
+            if st.session_state.get("chat_mode", "🤖 RAG (Document-based)") == "🤖 RAG (Document-based)":
+                # Use RAG mode
+                response = query_documents(prompt)
+            else:
+                # Use simple chat mode
+                response = simple_chat(prompt)
+            
+            if "error" in response:
+                st.error(f"Query failed: {response['error']}")
+            else:
+                # Add assistant message to history
+                st.session_state.messages.append({
+                    "role": "assistant", 
+                    "content": response["answer"],
+                    "sources": response.get("sources", []),
+                    "metadata": response.get("metadata", {})
+                })
+        st.rerun()
+    
     # Main content area
     tab1, tab2 = st.tabs(["💬 Chat", "📊 Analytics"])
     
     with tab1:
-        st.header("Ask Questions About Your Documents")
-        
-        # Initialize chat history
-        if "messages" not in st.session_state:
-            st.session_state.messages = []
+        # Show current mode
+        current_mode = st.session_state.get("chat_mode", "🤖 RAG (Document-based)")
+        if current_mode == "🤖 RAG (Document-based)":
+            st.header("🤖 Ask Questions About Your Documents")
+            st.info("💡 **RAG Mode**: I'll search through your uploaded documents to answer your questions.")
+        else:
+            st.header("💬 Simple Chat")
+            st.info("💡 **Simple Chat Mode**: I'll answer your questions directly without using documents.")
         
         # Display chat messages
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
+                
+                # Show metadata if available
+                if "metadata" in message and message["metadata"]:
+                    metadata = message["metadata"]
+                    if metadata.get("type") == "direct_llm":
+                        st.caption(f"🤖 {metadata.get('model', 'AI')} (Direct Chat)")
+                    elif metadata.get("type") == "rag":
+                        st.caption(f"📚 RAG Response")
                 
                 # Show sources if available
                 if "sources" in message and message["sources"]:
@@ -191,43 +270,7 @@ def main():
                             st.markdown(f"*{source['text']}*")
                             if "metadata" in source:
                                 st.markdown(f"**Document:** {source['metadata'].get('filename', 'Unknown')}")
-        
-        # Chat input
-        if prompt := st.chat_input("Ask a question about your documents..."):
-            # Add user message
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            
-            # Display user message
-            with st.chat_message("user"):
-                st.markdown(prompt)
-            
-            # Get assistant response
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    response = query_documents(prompt)
-                    
-                    if "error" in response:
-                        st.error(f"Query failed: {response['error']}")
-                    else:
-                        # Display answer
-                        st.markdown(response["answer"])
-                        
-                        # Display sources
-                        if response.get("sources"):
-                            with st.expander("📚 Sources"):
-                                for i, source in enumerate(response["sources"]):
-                                    st.markdown(f"**Source {i+1}:**")
-                                    st.markdown(f"*{source['text']}*")
-                                    if "metadata" in source:
-                                        st.markdown(f"**Document:** {source['metadata'].get('filename', 'Unknown')}")
-                                        st.markdown(f"**Score:** {source.get('score', 'N/A')}")
-                        
-                        # Add assistant message to history
-                        st.session_state.messages.append({
-                            "role": "assistant", 
-                            "content": response["answer"],
-                            "sources": response.get("sources", [])
-                        })
+                                st.markdown(f"**Score:** {source.get('score', 'N/A')}")
     
     with tab2:
         st.header("Document Analytics")
